@@ -26,6 +26,11 @@ struct ProjectSidebar: View {
 
             SidebarDivider()
 
+            // Git
+            GitSectionRow(mainViewMode: $mainViewMode)
+
+            SidebarDivider()
+
             ProjectSectionHeader(showingProjectForm: $showingProjectForm)
 
             AllTasksRow(selectedProjectId: $selectedProjectId, mainViewMode: $mainViewMode)
@@ -291,6 +296,70 @@ struct NotesSectionRow: View {
         .onTapGesture {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 mainViewMode = .notes
+            }
+        }
+        .onHover { hovering in isHovered = hovering }
+    }
+}
+
+// MARK: - Git Section Row
+struct GitSectionRow: View {
+    @EnvironmentObject var dataStore: DataStore
+    @Binding var mainViewMode: MainViewMode
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            ZStack {
+                RoundedRectangle(cornerRadius: DesignSystem.Radius.small)
+                    .fill(mainViewMode == .git ?
+                          LinearGradient(colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing) :
+                          LinearGradient(colors: [DesignSystem.Colors.accent.opacity(0.15), DesignSystem.Colors.accent.opacity(0.1)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .frame(width: 32, height: 32)
+
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(mainViewMode == .git ? .white : DesignSystem.Colors.accent)
+            }
+            .shadow(color: mainViewMode == .git ? DesignSystem.Colors.accent.opacity(0.3) : Color.clear, radius: 6, x: 0, y: 3)
+
+            Text("Git")
+                .font(DesignSystem.Fonts.body)
+                .fontWeight(mainViewMode == .git ? .semibold : .regular)
+                .foregroundColor(mainViewMode == .git ? DesignSystem.Colors.textPrimary : DesignSystem.Colors.textSecondary)
+
+            Spacer()
+
+            if dataStore.gitRepositories.count > 0 {
+                Text("\(dataStore.gitRepositories.filter { $0.isActive }.count)")
+                    .font(DesignSystem.Fonts.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(mainViewMode == .git ? DesignSystem.Colors.accent : DesignSystem.Colors.textTertiary)
+                    .padding(.horizontal, DesignSystem.Spacing.sm)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(mainViewMode == .git ? DesignSystem.Colors.accent.opacity(0.15) : DesignSystem.Colors.border)
+                    )
+            }
+        }
+        .padding(.horizontal, DesignSystem.Spacing.md)
+        .padding(.vertical, DesignSystem.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.Radius.medium)
+                .fill(mainViewMode == .git ? DesignSystem.Colors.accent.opacity(0.1) : (isHovered ? Color.black.opacity(0.03) : Color.clear))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignSystem.Radius.medium)
+                        .stroke(mainViewMode == .git ? DesignSystem.Colors.accent.opacity(0.2) : Color.clear, lineWidth: 1)
+                )
+        )
+        .padding(.horizontal, DesignSystem.Spacing.sm)
+        .padding(.top, DesignSystem.Spacing.md)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                mainViewMode = .git
             }
         }
         .onHover { hovering in isHovered = hovering }

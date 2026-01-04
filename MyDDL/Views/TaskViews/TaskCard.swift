@@ -22,6 +22,7 @@ struct TaskColorPalette {
 }
 
 struct TaskCard: View {
+    @EnvironmentObject var dataStore: DataStore
     let task: Task
     let project: Project?
     let isCompact: Bool
@@ -52,6 +53,50 @@ struct TaskCard: View {
                 .foregroundColor(.white)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // 标签显示
+            if !task.tags.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(task.tags.prefix(3), id: \.self) { tag in
+                        CompactTagBadge(tagName: tag)
+                    }
+                    if task.tags.count > 3 {
+                        Text("+\(task.tags.count - 3)")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+            }
+
+            // 子任务进度
+            if dataStore.hasSubTasks(task) {
+                let progress = dataStore.subTaskProgress(for: task)
+                HStack(spacing: 4) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.9))
+
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.white.opacity(0.3))
+                                .frame(height: 4)
+
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.white)
+                                .frame(width: geometry.size.width * progress, height: 4)
+                        }
+                    }
+                    .frame(height: 4)
+
+                    let subtasks = dataStore.subTasks(for: task)
+                    let completed = subtasks.filter { $0.status == .completed }.count
+                    Text("\(completed)/\(subtasks.count)")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
+                }
+                .frame(height: 10)
+            }
         }
         .padding(.horizontal, DesignSystem.Spacing.md)
         .padding(.vertical, DesignSystem.Spacing.sm)
@@ -183,6 +228,29 @@ struct TaskCard: View {
                             Label(String(format: "%.1fh", task.estimatedHours), systemImage: "clock")
                                 .font(DesignSystem.Fonts.tiny)
                                 .foregroundColor(DesignSystem.Colors.textTertiary)
+                        }
+
+                        // 子任务进度
+                        if dataStore.hasSubTasks(task) {
+                            let subtasks = dataStore.subTasks(for: task)
+                            let completed = subtasks.filter { $0.status == .completed }.count
+                            Label("\(completed)/\(subtasks.count) 子任务", systemImage: "checklist")
+                                .font(DesignSystem.Fonts.tiny)
+                                .foregroundColor(DesignSystem.Colors.accent)
+                        }
+                    }
+
+                    // 标签显示
+                    if !task.tags.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(task.tags.prefix(5), id: \.self) { tag in
+                                FullTagBadge(tagName: tag)
+                            }
+                            if task.tags.count > 5 {
+                                Text("+\(task.tags.count - 5)")
+                                    .font(DesignSystem.Fonts.tiny)
+                                    .foregroundColor(DesignSystem.Colors.textTertiary)
+                            }
                         }
                     }
                 }
@@ -362,5 +430,52 @@ struct MultiDayTaskBar: View {
             }
         }
         .frame(height: 26)
+    }
+}
+
+// MARK: - Tag Badge Components
+struct CompactTagBadge: View {
+    let tagManager = TagManager.shared
+    let tagName: String
+
+    var body: some View {
+        Text(tagName)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.white.opacity(0.25))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.white.opacity(0.4), lineWidth: 0.5)
+            )
+    }
+}
+
+struct FullTagBadge: View {
+    let tagManager = TagManager.shared
+    let tagName: String
+
+    var tagColor: Color {
+        tagManager.getTag(by: tagName)?.color ?? DesignSystem.Colors.accent
+    }
+
+    var body: some View {
+        Text(tagName)
+            .font(DesignSystem.Fonts.tiny)
+            .foregroundColor(tagColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(tagColor.opacity(0.15))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(tagColor.opacity(0.4), lineWidth: 0.5)
+            )
     }
 }

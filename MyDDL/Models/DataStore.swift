@@ -6,8 +6,11 @@ class DataStore: ObservableObject {
     @Published var projects: [Project] = []
     @Published var requirements: [Requirement] = []
     @Published var notes: [Note] = []
+    @Published var gitRepositories: [GitRepository] = []
+    @Published var cachedGitCommits: [GitCommit] = []
 
     private let db = DatabaseManager.shared
+    let gitManager = GitManager.shared
 
     init() {
         loadData()
@@ -20,6 +23,7 @@ class DataStore: ObservableObject {
         projects = db.fetchAllProjects()
         requirements = db.fetchAllRequirements()
         notes = db.fetchAllNotes()
+        gitRepositories = db.fetchAllGitRepositories()
 
         // Add default project if none exist
         if projects.isEmpty {
@@ -117,6 +121,119 @@ class DataStore: ObservableObject {
         projects.append(project)
         db.saveProject(project)
     }
+
+    // MARK: - SubTask Methods
+
+    /// 获取任务的所有子任务
+    func subTasks(for task: Task) -> [Task] {
+        tasks.filter { $0.parentTaskId == task.id }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// 获取任务的父任务
+    func parentTask(for task: Task) -> Task? {
+        guard let parentId = task.parentTaskId else { return nil }
+        return tasks.first { $0.id == parentId }
+    }
+
+    /// 检查任务是否有子任务
+    func hasSubTasks(_ task: Task) -> Bool {
+        tasks.contains { $0.parentTaskId == task.id }
+    }
+
+    /// 计算子任务完成进度 (0.0 - 1.0)
+    func subTaskProgress(for task: Task) -> Double {
+        let subtasks = subTasks(for: task)
+        guard !subtasks.isEmpty else { return 0.0 }
+
+        let completedCount = subtasks.filter { $0.status == .completed }.count
+        return Double(completedCount) / Double(subtasks.count)
+    }
+
+    /// 添加子任务
+    func addSubTask(to parentTask: Task, title: String, startDate: Date, endDate: Date) {
+        let subTask = Task(
+            title: title,
+            startDate: startDate,
+            endDate: endDate,
+            projectId: parentTask.projectId,
+            parentTaskId: parentTask.id,
+            tags: parentTask.tags
+        )
+        addTaskWithoutRequirement(subTask)
+    }
+
+    /// 删除任务及其所有子任务
+    func deleteTaskWithSubTasks(_ task: Task) {
+        // 先删除所有子任务
+        let subtasks = subTasks(for: task)
+        for subtask in subtasks {
+            deleteTask(subtask)
+        }
+
+        // 再删除父任务
+        deleteTask(task)
+    }
+
+    // MARK: - Tag Methods
+
+    /// 获取所有使用中的标签（去重）
+    func allUsedTags() -> [String] {
+        var tagSet = Set<String>()
+        for task in tasks {
+            task.tags.forEach { tagSet.insert($0) }
+        }
+        return Array(tagSet).sorted()
+    }
+
+    /// 按标签筛选任务
+    func tasks(withTag tag: String) -> [Task] {
+        tasks.filter { $0.tags.contains(tag) }
+    }
+
+    /// 按标签组合筛选（任务必须包含所有指定标签）
+    func tasks(withTags tags: [String]) -> [Task] {
+        guard !tags.isEmpty else { return tasks }
+        return tasks.filter { task in
+            tags.allSatisfy { tag in task.tags.contains(tag) }
+        }
+    }
+
+    /// 按标签组合筛选（任务包含任一标签即可）
+    func tasks(withAnyTag tags: [String]) -> [Task] {
+        guard !tags.isEmpty else { return tasks }
+        return tasks.filter { task in
+            tags.contains(where: { tag in task.tags.contains(tag) })
+        }
+    }
+
+    /// 为任务添加标签
+    func addTag(_ tag: String, to task: Task) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        var updatedTask = tasks[index]
+
+        if !updatedTask.tags.contains(tag) {
+            updatedTask.tags.append(tag)
+            updatedTask.updatedAt = Date()
+            tasks[index] = updatedTask
+            db.saveTask(updatedTask)
+        }
+    }
+
+    /// 从任务中移除标签
+    func removeTag(_ tag: String, from task: Task) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        var updatedTask = tasks[index]
+
+        if let tagIndex = updatedTask.tags.firstIndex(of: tag) {
+            updatedTask.tags.remove(at: tagIndex)
+            updatedTask.updatedAt = Date()
+            tasks[index] = updatedTask
+            db.saveTask(updatedTask)
+        }
+    }
+
+    // MARK: - Project CRUD (continued)
 
     func updateProject(_ project: Project) {
         if let index = projects.firstIndex(where: { $0.id == project.id }) {
@@ -478,6 +595,153 @@ class DataStore: ObservableObject {
             return .p2
         } else {
             return .p2
+        }
+    }
+
+    // MARK: - Git Repository Operations
+
+    func addGitRepository(_ repository: GitRepository) {
+        gitRepositories.append(repository)
+        db.saveGitRepository(repository)
+    }
+
+    func updateGitRepository(_ repository: GitRepository) {
+        if let index = gitRepositories.firstIndex(where: { $0.id == repository.id }) {
+            var updated = repository
+            updated.updatedAt = Date()
+            gitRepositories[index] = updated
+            db.saveGitRepository(updated)
+        }
+    }
+
+    func deleteGitRepository(_ repository: GitRepository) {
+        gitRepositories.removeAll { $0.id == repository.id }
+        db.deleteGitRepository(id: repository.id)
+    }
+
+    func scanRepositoriesInPath(_ basePath: String) {
+        let scannedRepos = gitManager.scanForRepositories(in: basePath)
+
+        for scannedRepo in scannedRepos {
+            // 检查是否已存在
+            if !gitRepositories.contains(where: { $0.path == scannedRepo.path }) {
+                addGitRepository(scannedRepo)
+            }
+        }
+    }
+
+    // MARK: - Git Commit Operations
+
+    // 当前 Git 用户名（从 UserDefaults 读取）
+    private var currentGitAuthor: String {
+        UserDefaults.standard.string(forKey: "gitAuthorName") ?? ""
+    }
+
+    func fetchCommits(for repository: GitRepository, from startDate: Date, to endDate: Date) async {
+        // 只从数据库读取，不再自动从git获取
+        let commits = db.fetchGitCommits(for: repository.id, from: startDate, to: endDate)
+
+        // 如果配置了作者过滤，应用过滤
+        let author = currentGitAuthor
+        let filteredCommits = author.isEmpty ? commits : commits.filter { $0.authorName.contains(author) }
+
+        await MainActor.run {
+            cachedGitCommits = filteredCommits
+        }
+    }
+
+    func getTodayCommits(for repository: GitRepository) async -> [GitCommit] {
+        // 从数据库读取今天的提交
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+
+        let commits = db.fetchGitCommits(for: repository.id, from: today, to: tomorrow)
+
+        // 如果配置了作者过滤，应用过滤
+        let author = currentGitAuthor
+        return author.isEmpty ? commits : commits.filter { $0.authorName.contains(author) }
+    }
+
+    func getAllTodayCommits() async -> [GitCommit] {
+        // 从数据库读取今天的所有提交
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+
+        var allCommits: [GitCommit] = []
+        let activeRepos = gitRepositories.filter { $0.isActive }
+
+        for repository in activeRepos {
+            let commits = db.fetchGitCommits(for: repository.id, from: today, to: tomorrow)
+            allCommits.append(contentsOf: commits)
+        }
+
+        // 如果配置了作者过滤，应用过滤
+        let author = currentGitAuthor
+        let filteredCommits = author.isEmpty ? allCommits : allCommits.filter { $0.authorName.contains(author) }
+
+        return filteredCommits.sorted { $0.date > $1.date }
+    }
+
+    func getCommitsForDate(_ date: Date) async -> [GitCommit] {
+        print("[DataStore] 🔍 getCommitsForDate 开始")
+
+        // 在主线程先捕获所需数据
+        let activeRepos = self.gitRepositories.filter { $0.isActive }
+        let author = self.currentGitAuthor
+        let dbManager = self.db
+
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+
+        print("[DataStore] 🔍 活跃仓库: \(activeRepos.count), 开始后台查询")
+
+        // 在后台线程执行数据库操作
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                print("[DataStore] 🔍 后台线程开始")
+                var allCommits: [GitCommit] = []
+
+                for repository in activeRepos {
+                    let commits = dbManager.fetchGitCommits(for: repository.id, from: startOfDay, to: endOfDay)
+                    allCommits.append(contentsOf: commits)
+                }
+
+                if !author.isEmpty {
+                    allCommits = allCommits.filter { $0.authorName.contains(author) }
+                }
+
+                print("[DataStore] 🔍 查询完成: \(allCommits.count) 条")
+                continuation.resume(returning: allCommits.sorted { $0.date > $1.date })
+            }
+        }
+    }
+
+    // 保存git提交记录到数据库
+    func saveGitCommits(_ commits: [GitCommit]) {
+        db.saveGitCommits(commits)
+    }
+
+    // 删除指定仓库的所有提交记录
+    func deleteGitCommitsForRepository(_ repositoryId: UUID) {
+        db.deleteGitCommitsForRepository(repositoryId)
+    }
+
+    // 获取指定日期范围的提交记录（不带过滤）
+    func getCommitsForDateRange(repositoryId: UUID, from startDate: Date, to endDate: Date) -> [GitCommit] {
+        return db.fetchGitCommits(for: repositoryId, from: startDate, to: endDate)
+    }
+
+    func getCommitStats(for repository: GitRepository, days: Int = 7) async -> GitCommitStats? {
+        do {
+            let endDate = Date()
+            let startDate = Calendar.current.date(byAdding: .day, value: -days, to: endDate)!
+            return try await gitManager.getCommitStats(for: repository, from: startDate, to: endDate)
+        } catch {
+            print("Get commit stats error: \(error)")
+            return nil
         }
     }
 }

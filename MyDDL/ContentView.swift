@@ -27,6 +27,7 @@ enum MainViewMode {
     case calendar
     case requirements
     case notes
+    case git
 }
 
 // 用于 sheet(item:) 的日期范围结构
@@ -132,6 +133,11 @@ struct ContentView: View {
                         NoteEditorView(note: $selectedNote)
                             .id(selectedNote?.id)
                     }
+                } else if mainViewMode == .git {
+                    // Git view
+                    GitDashboardView()
+                        .environmentObject(dataStore)
+                        .environmentObject(themeManager)
                 }
             }
             .background(DesignSystem.Colors.secondaryBackground)

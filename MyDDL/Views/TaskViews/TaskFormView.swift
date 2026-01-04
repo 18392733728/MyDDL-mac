@@ -235,6 +235,7 @@ struct TaskFormView: View {
     @State private var selectedProjectId: UUID?
     @State private var selectedRequirementId: UUID?
     @State private var notes: String = ""
+    @State private var selectedTags: [String] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -346,6 +347,20 @@ struct TaskFormView: View {
                         }
                     }
 
+                    // Tags
+                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                        Text("标签")
+                            .font(DesignSystem.Fonts.caption)
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
+
+                        TagSelector(selectedTags: $selectedTags)
+                    }
+
+                    // Sub Tasks (only for existing tasks)
+                    if let task = existingTask, !task.isSubTask {
+                        SubTaskList(parentTask: task)
+                    }
+
                     // Notes
                     VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
                         Text("备注")
@@ -439,6 +454,7 @@ struct TaskFormView: View {
                 selectedProjectId = task.projectId
                 selectedRequirementId = task.requirementId
                 notes = task.notes
+                selectedTags = task.tags
             } else {
                 startDate = initialDate
                 endDate = initialEndDate ?? initialDate
@@ -460,6 +476,7 @@ struct TaskFormView: View {
             task.projectId = selectedProjectId
             task.requirementId = selectedRequirementId
             task.notes = notes
+            task.tags = selectedTags
             dataStore.updateTask(task)
         } else {
             let task = Task(
@@ -468,7 +485,8 @@ struct TaskFormView: View {
                 endDate: endDate,
                 projectId: selectedProjectId,
                 requirementId: selectedRequirementId,
-                notes: notes
+                notes: notes,
+                tags: selectedTags
             )
             dataStore.addTask(task)
         }

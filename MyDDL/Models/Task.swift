@@ -58,6 +58,8 @@ struct Task: Identifiable, Codable, Equatable {
     var notes: String
     var createdAt: Date
     var updatedAt: Date
+    var parentTaskId: UUID?
+    var tags: [String]
 
     init(
         id: UUID = UUID(),
@@ -71,7 +73,9 @@ struct Task: Identifiable, Codable, Equatable {
         requirementId: UUID? = nil,
         notes: String = "",
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        parentTaskId: UUID? = nil,
+        tags: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -85,6 +89,8 @@ struct Task: Identifiable, Codable, Equatable {
         self.notes = notes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.parentTaskId = parentTaskId
+        self.tags = tags
     }
 
     var isMultiDay: Bool {
@@ -110,6 +116,15 @@ struct Task: Identifiable, Codable, Equatable {
     var isOverdue: Bool {
         if status == .completed { return false }
         return endDate < Date()
+    }
+
+    var isSubTask: Bool {
+        parentTaskId != nil
+    }
+
+    var hasSubTasks: Bool {
+        // This will be computed by DataStore
+        false
     }
 }
 

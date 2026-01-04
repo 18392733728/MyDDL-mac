@@ -33,6 +33,10 @@ class ThemeManager: ObservableObject {
         }
     }
 
+    var current: ThemeColors {
+        ThemeColors.colors(for: currentTheme)
+    }
+
     private let themeKey = "app_theme"
 
     private init() {
